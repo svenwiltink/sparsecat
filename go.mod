@@ -1,4 +1,4 @@
-module sparsecat
+module github.com/svenwiltink/sparsecat
 
 go 1.16
 
