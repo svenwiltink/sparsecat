@@ -2,9 +2,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"golang.org/x/sys/unix"
 	"io"
-	"log"
 	"os"
 	"syscall"
 )
@@ -17,26 +17,28 @@ const (
 func DetectDataSection(file *os.File, offset int64) (start int64, end int64, err error) {
 	var syserr syscall.Errno
 
-	log.Println("seeking to data. current offset ", offset)
 	startOfData, err := unix.Seek(int(file.Fd()), offset, SEEK_DATA)
 	if errors.As(err, &syserr) {
 		if syserr == syscall.ENXIO {
 			return -1, -1, io.EOF
 		}
-		return -1, -1, err
+		return -1, -1, fmt.Errorf("error seeking to data: %w", err)
 	}
 
 	if err != nil {
-		return -1, -1, err
+		return -1, -1, fmt.Errorf("error seeking to data: %w", err)
 	}
 
-	log.Println("seeking to hole. current offset ", offset)
 	endOfData, err := unix.Seek(int(file.Fd()), startOfData, SEEK_HOLE)
 	if errors.As(err, &syserr) {
 		if syserr == syscall.ENXIO {
 			return -1, -1, io.EOF
 		}
-		return -1, -1, err
+		return -1, -1, fmt.Errorf("error seeking to hole: %w", err)
+	}
+
+	if err != nil {
+		return -1, -1, fmt.Errorf("error seeking to hole: %w", err)
 	}
 
 	return startOfData, endOfData, err
