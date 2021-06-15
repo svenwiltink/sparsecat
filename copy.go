@@ -141,46 +141,55 @@ func ReceiveSparseFile(output *os.File, input io.Reader) error {
 	}
 }
 
-// SendSparseFile sends the sparse file to the output reader in a simple binary format.
+// NewSparseReader creates a new reader that outputs a stream of sparse data. Data is created in chunks.
 // Starting with the size of the file followed by section of data indicating the offset and
 // length of data to be written. The format is binary compatible with ceph rbd import-diff.
-func SendSparseFile(input *os.File, output io.Writer) error {
+func NewSparseReader(input *os.File) (io.ReadCloser, error) {
+	pr, pw := io.Pipe()
 	var offset int64 = 0
 
 	info, err := input.Stat()
 	if err != nil {
-		return fmt.Errorf("error running stat: %w", err)
+		return nil, fmt.Errorf("error running stat: %w", err)
 	}
 
-	err = writeSizeSection(output, info.Size())
-	if err != nil {
-		return fmt.Errorf("error writing size section: %w", err)
-	}
-
-	for {
-		start, end, err := detectDataSection(input, offset)
-		if errors.Is(err, io.EOF) {
-			break
-		}
-
+	go func() {
+		err = writeSizeSection(pw, info.Size())
 		if err != nil {
-			return fmt.Errorf("error detecting data section: %w", err)
+			pw.CloseWithError(fmt.Errorf("error writing size section: %w", err))
+			return
 		}
 
-		err = writeDataSection(output, input, start, end)
+		for {
+			start, end, err := detectDataSection(input, offset)
+			if errors.Is(err, io.EOF) {
+				break
+			}
+
+			if err != nil {
+				pw.CloseWithError(fmt.Errorf("error detecting data section: %w", err))
+				return
+			}
+
+			err = writeDataSection(pw, input, start, end)
+			if err != nil {
+				pw.CloseWithError(fmt.Errorf("error writing data: %w", err))
+				return
+			}
+
+			offset = end
+		}
+
+		err = writeEndSection(pw)
 		if err != nil {
-			return fmt.Errorf("error writing data: %w", err)
+			pw.CloseWithError(fmt.Errorf("error writing end section: %w", err))
+			return
 		}
 
-		offset = end
-	}
+		pw.Close()
+	}()
 
-	err = writeEndSection(output)
-	if err != nil {
-		return fmt.Errorf("error writing end section: %w", err)
-	}
-
-	return nil
+	return pr, nil
 }
 
 func writeEndSection(w io.Writer) error {
