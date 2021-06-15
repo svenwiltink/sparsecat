@@ -26,8 +26,11 @@ func (zeroReader) Read(p []byte) (int, error) {
 
 // ToNormalReader converts a sparsecat stream into a normal data stream.
 // This can be useful when combining sparsecat with other readers. When
-// serving a sparsecat file on a webserver for example
-func ToNormalReader(input io.Reader) io.Reader {
+// serving a sparsecat file on a webserver for example.
+//
+// Returns an io.ReadCloser for early cancellation in case of an error
+// on the reader side
+func ToNormalReader(input io.Reader) io.ReadCloser {
 	reader, writer := io.Pipe()
 
 	go func() {
