@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"github.com/svenwiltink/sparsecat"
+	"io"
 	"log"
 	"os"
 )
@@ -42,14 +43,16 @@ func main() {
 	defer outputFile.Close()
 
 	if operation == Send {
-		err := sparsecat.SendSparseFile(inputFile, outputFile)
+		encoder := sparsecat.NewEncoder(inputFile)
+		_, err := io.Copy(outputFile, encoder)
 		if err != nil {
 			log.Fatal(err)
 		}
 		return
 	}
 
-	err := sparsecat.ReceiveSparseFile(outputFile, inputFile)
+	decoder := sparsecat.NewDecoder(inputFile)
+	_, err := io.Copy(outputFile, decoder)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -79,9 +82,6 @@ func setupFiles(operation OperationType, inputFileName string, outputFileName st
 
 	if outputFileName == "-" {
 		outputFile = os.Stdout
-		if operation == Receive {
-			log.Fatal("input must be a file when receiving data")
-		}
 	} else {
 		outputFile, err = os.Create(outputFileName)
 		if err != nil {
