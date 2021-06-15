@@ -14,6 +14,74 @@ const (
 	endIndicator  byte = 'e'
 )
 
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	for index, _ := range p {
+		p[index] = 0
+	}
+
+	return len(p), nil
+}
+
+func ToNormalReader(input io.Reader) io.Reader {
+	reader, writer := io.Pipe()
+
+	go func() {
+		var currentOffset int64 = 0
+		size, err := getFileSize(input)
+
+		if err != nil {
+			writer.CloseWithError(fmt.Errorf("error determining target file size: %w", err))
+			return
+		}
+
+		// use 8 + 8 here as that is the maximum buffer size we need for parsing getting
+		// the data size. The two int64 for writing data sections.
+		var segmentHeader [8 + 8]byte
+
+		for {
+			// first byte contains the segment type
+			_, err := io.ReadFull(input, segmentHeader[0:1])
+			if err != nil {
+				writer.CloseWithError(fmt.Errorf("error reading segmentHeader header: %w", err))
+				return
+			}
+
+			switch segmentHeader[0] {
+			case endIndicator:
+				_, err = io.Copy(writer, io.LimitReader(zeroReader{}, int64(size-currentOffset)))
+				writer.Close()
+				return
+			case dataIndicator:
+				_, err = io.ReadFull(input, segmentHeader[:])
+				if err != nil {
+					writer.CloseWithError(fmt.Errorf("error reading data header: %w", err))
+					return
+				}
+
+				offset := binary.LittleEndian.Uint64(segmentHeader[:9])
+				length := binary.LittleEndian.Uint64(segmentHeader[8:])
+
+				// instead of seeking we fill the stream with enough empty data
+				_, err = io.Copy(writer, io.LimitReader(zeroReader{}, int64(offset)-currentOffset))
+				_, err = io.Copy(writer, io.LimitReader(input, int64(length)))
+				if err != nil {
+					writer.CloseWithError(fmt.Errorf("error copying data: %w", err))
+					return
+				}
+
+				currentOffset = int64(offset + length)
+			default:
+				writer.CloseWithError(fmt.Errorf("invalid section type: %b", segmentHeader[0]))
+				return
+			}
+		}
+	}()
+
+	return reader
+}
+
 // ReceiveSparseFile parses the input stream and writes the data to the target file
 // the target file is first truncated to the correct size. Data that already exists
 // in the target file is _not_ removed yet. This means the target file should be
