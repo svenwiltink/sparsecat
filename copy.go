@@ -30,62 +30,72 @@ func (zeroReader) Read(p []byte) (int, error) {
 //
 // Returns an io.ReadCloser for early cancellation in case of an error
 // on the reader side
-func ToNormalReader(input io.Reader) io.ReadCloser {
+func ToNormalReader(input io.Reader) (io.ReadCloser, error) {
 	reader, writer := io.Pipe()
 
 	go func() {
-		var currentOffset int64 = 0
-		size, err := getFileSize(input)
+		err := func() error {
+			var currentOffset int64 = 0
+			size, err := getFileSize(input)
 
-		if err != nil {
-			writer.CloseWithError(fmt.Errorf("error determining target file size: %w", err))
-			return
-		}
-
-		// use 8 + 8 here as that is the maximum buffer size we need for parsing getting
-		// the data size. The two int64 for writing data sections.
-		var segmentHeader [8 + 8]byte
-
-		for {
-			// first byte contains the segment type
-			_, err := io.ReadFull(input, segmentHeader[0:1])
 			if err != nil {
-				writer.CloseWithError(fmt.Errorf("error reading segmentHeader header: %w", err))
-				return
+
+				writer.CloseWithError(fmt.Errorf("error determining target file size: %w", err))
+				return err
 			}
 
-			switch segmentHeader[0] {
-			case endIndicator:
-				_, err = io.Copy(writer, io.LimitReader(zeroReader{}, size-currentOffset))
-				writer.Close()
-				return
-			case dataIndicator:
-				_, err = io.ReadFull(input, segmentHeader[:])
+			// use 8 + 8 here as that is the maximum buffer size we need for parsing getting
+			// the data size. The two int64 for writing data sections.
+			var segmentHeader [8 + 8]byte
+
+			for {
+				// first byte contains the segment type
+				_, err := io.ReadFull(input, segmentHeader[0:1])
 				if err != nil {
-					writer.CloseWithError(fmt.Errorf("error reading data header: %w", err))
-					return
+					writer.CloseWithError(fmt.Errorf("error reading segmentHeader header: %w", err))
+					return err
 				}
 
-				offset := binary.LittleEndian.Uint64(segmentHeader[:9])
-				length := binary.LittleEndian.Uint64(segmentHeader[8:])
+				switch segmentHeader[0] {
+				case endIndicator:
+					_, err = io.Copy(writer, io.LimitReader(zeroReader{}, size-currentOffset))
+					writer.Close()
+					return err
+				case dataIndicator:
+					_, err = io.ReadFull(input, segmentHeader[:])
+					if err != nil {
+						writer.CloseWithError(fmt.Errorf("error reading data header: %w", err))
+						return err
+					}
 
-				// instead of seeking we fill the stream with enough empty data
-				_, err = io.Copy(writer, io.LimitReader(zeroReader{}, int64(offset)-currentOffset))
-				_, err = io.Copy(writer, io.LimitReader(input, int64(length)))
-				if err != nil {
-					writer.CloseWithError(fmt.Errorf("error copying data: %w", err))
-					return
+					offset := binary.LittleEndian.Uint64(segmentHeader[:9])
+					length := binary.LittleEndian.Uint64(segmentHeader[8:])
+
+					// instead of seeking we fill the stream with enough empty data
+					_, err = io.Copy(writer, io.LimitReader(zeroReader{}, int64(offset)-currentOffset))
+					if err != nil {
+						writer.CloseWithError(fmt.Errorf("error copying data: %w", err.Error()))
+						return err
+					}
+					_, err = io.Copy(writer, io.LimitReader(input, int64(length)))
+					if err != nil {
+						writer.CloseWithError(fmt.Errorf("error copying data: %w", err.Error()))
+						return err
+					}
+
+					currentOffset = int64(offset + length)
+				default:
+					writer.CloseWithError(fmt.Errorf("invalid section type: %b", segmentHeader[0]))
+					return err
 				}
-
-				currentOffset = int64(offset + length)
-			default:
-				writer.CloseWithError(fmt.Errorf("invalid section type: %b", segmentHeader[0]))
-				return
 			}
+		}()
+		if err != nil {
+			writer.CloseWithError(err)
 		}
 	}()
 
-	return reader
+	return reader, nil
 }
 
 // ReceiveSparseFile parses the input stream and writes the data to the target file
