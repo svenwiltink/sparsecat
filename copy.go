@@ -56,7 +56,7 @@ func ToNormalReader(input io.Reader) io.ReadCloser {
 
 			switch segmentHeader[0] {
 			case endIndicator:
-				_, err = io.Copy(writer, io.LimitReader(zeroReader{}, int64(size-currentOffset)))
+				_, err = io.Copy(writer, io.LimitReader(zeroReader{}, size-currentOffset))
 				writer.Close()
 				return
 			case dataIndicator:
