@@ -67,7 +67,7 @@ func (s *SparseDecoder) WriteTo(writer io.Writer) (int64, error) {
 			log.Println("not a regular file, falling back to basic normal byte stream")
 			isFile = false
 		} else {
-			err = file.Truncate(size)
+			err = SparseTruncate(file, size)
 			if err != nil {
 				return 0, fmt.Errorf("error truncating target file: %w", err)
 			}
@@ -85,9 +85,12 @@ func (s *SparseDecoder) WriteTo(writer io.Writer) (int64, error) {
 
 		switch segmentHeader[0] {
 		case endIndicator:
-			copied, err := io.Copy(writer, io.LimitReader(zeroReader{}, size-currentOffset))
-			written += copied
-			return copied, err
+			if !isFile {
+				var copied int64
+				copied, err = io.Copy(writer, io.LimitReader(zeroReader{}, size-currentOffset))
+				written += copied
+			}
+			return written, err
 		case dataIndicator:
 			_, err = io.ReadFull(s.reader, segmentHeader[:])
 			if err != nil {
