@@ -50,7 +50,7 @@ func getFileSize(input io.Reader) (int64, error) {
 }
 
 // SparseDecoder decodes an incoming sparsecat stream. It is able to convert it to a 'normal'
-// stream of data using the WriteTo method. An optimized is used  when the target of an io.Copy
+// stream of data using the WriteTo method. An optimized path is used  when the target of an io.Copy
 // is an *os.File (not a pipe or socket)
 type SparseDecoder struct {
 	reader io.Reader
