@@ -48,3 +48,7 @@ func detectDataSection(file *os.File, offset int64) (start int64, end int64, err
 
 	return startOfData, endOfData, err
 }
+
+func SparseTruncate(file *os.File, size int64) error {
+	return file.Truncate(size)
+}

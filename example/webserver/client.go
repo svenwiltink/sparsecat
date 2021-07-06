@@ -8,16 +8,15 @@ import (
 )
 
 func main() {
-
 	source, err := os.Open("image.raw")
 	if err != nil {
 		panic(err)
 	}
+	defer source.Close()
 
-	sparseReader, err := sparsecat.NewSparseReader(source)
-	defer sparseReader.Close()
+	sparseEncoder := sparsecat.NewEncoder(source)
 
-	resp, err := http.Post("http://localhost:6969/store", "application/octet-stream", sparseReader)
+	resp, err := http.Post("http://localhost:6969/store", "application/octet-stream", sparseEncoder)
 	if err != nil {
 		panic(err)
 	}
