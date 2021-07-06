@@ -38,6 +38,7 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
+		defer target.Close()
 
 		zw := gzip.NewWriter(target)
 		_, err = io.Copy(zw, sparseReader)

@@ -65,6 +65,7 @@ type SparseDecoder struct {
 	done bool
 }
 
+// Read is the slow path of the decoder. It output the entire sparse file.
 func (s *SparseDecoder) Read(p []byte) (int, error) {
 	var err error
 	if s.currentSection == nil {
@@ -147,6 +148,9 @@ func (s *SparseDecoder) parseSection() error {
 	return nil
 }
 
+// WriteTo is the fast path optimisation of SparseDecoder.Read. If the target of io.Copy is an *os.File that is
+// capable of seeking WriteTo will be used. It preserves the sparseness of the target file and does not need
+// to write the entire file. Only section of the file containing data will be written.
 func (s *SparseDecoder) WriteTo(writer io.Writer) (int64, error) {
 	file, isFile := s.isSeekableFile(writer)
 	if !isFile {
