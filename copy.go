@@ -1,11 +1,11 @@
 package sparsecat
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 )
 
@@ -33,6 +33,22 @@ func NewDecoder(reader io.Reader) *SparseDecoder {
 	return &SparseDecoder{reader: reader}
 }
 
+func getFileSize(input io.Reader) (int64, error) {
+	// 1 byte for segment type. 8 bytes for int64
+	var header [1 + 8]byte
+	_, err := io.ReadFull(input, header[:])
+	if err != nil {
+		return 0, err
+	}
+
+	if header[0] != sizeIndicator {
+		return 0, fmt.Errorf("invalid header. Expected size segment but got %s", string(header[0]))
+	}
+
+	size := binary.LittleEndian.Uint64(header[1:])
+	return int64(size), nil
+}
+
 // SparseDecoder decodes an incoming sparsecat stream. It is able to convert it to a 'normal'
 // stream of data using the WriteTo method. An optimized is used  when the target of an io.Copy
 // is an *os.File (not a pipe or socket)
@@ -50,7 +66,6 @@ type SparseDecoder struct {
 }
 
 func (s *SparseDecoder) Read(p []byte) (int, error) {
-	log.Println("slow path")
 	var err error
 	if s.currentSection == nil {
 		s.fileSize, err = getFileSize(s.reader)
@@ -205,111 +220,100 @@ func NewEncoder(file *os.File) *Encoder {
 
 // Encoder encodes a file to a stream of sparsecat data.
 type Encoder struct {
-	file *os.File
+	file     *os.File
+	fileSize int64
+
+	currentOffset        int64
+	currentSection       io.Reader
+	currentSectionLength int64
+	currentSectionEnd    int64
+	currentSectionRead   int
+
+	done bool
 }
 
 func (e *Encoder) Read(p []byte) (int, error) {
-	panic("not implemented")
-}
-
-func (e *Encoder) WriteTo(writer io.Writer) (int64, error) {
-	log.Println("encoder fast path")
-	info, err := e.file.Stat()
-	if err != nil {
-		return 0, fmt.Errorf("error running stat: %w", err)
-	}
-
-	var written int64 = 0
-	var offset int64 = 0
-
-	writtenSize, err := writeSizeSection(writer, info.Size())
-	written += int64(writtenSize)
-	if err != nil {
-		return written, fmt.Errorf("error writing size section: %w", err)
-	}
-
-	for {
-		start, end, err := detectDataSection(e.file, offset)
-		if errors.Is(err, io.EOF) {
-			break
-		}
-
+	if e.currentSection == nil {
+		info, err := e.file.Stat()
 		if err != nil {
-			return written, fmt.Errorf("error detecting data section: %w", err)
+			return 0, fmt.Errorf("error running stat: %w", err)
 		}
 
-		copied, err := writeDataSection(writer, e.file, start, end)
-		written += copied
-		if err != nil {
-			return written, fmt.Errorf("error writing data: %w", err)
-		}
-
-		offset = end
+		buf := make([]byte, 9)
+		buf[0] = sizeIndicator
+		binary.LittleEndian.PutUint64(buf[1:], uint64(info.Size()))
+		e.currentSection = bytes.NewReader(buf)
+		e.currentSectionLength = 9
 	}
 
-	endSectionWritten, err := writeEndSection(writer)
-	written += int64(endSectionWritten)
+	read, err := e.currentSection.Read(p)
+	e.currentSectionRead += read
+
+	if err == nil {
+		return read, err
+	}
+
+	if !errors.Is(err, io.EOF) {
+		return read, err
+	}
+
+	// current section has ended. Was it expected?
+	if e.currentSectionLength != int64(e.currentSectionRead) {
+		return read, fmt.Errorf("read size doesn't equal section size. %d vs %d. %w", e.currentSectionRead, e.currentSectionLength, io.ErrUnexpectedEOF)
+	}
+
+	// are there more sections to come?
+	if e.done {
+		return read, io.EOF
+	}
+
+	e.currentOffset += e.currentSectionEnd
+	e.currentSectionRead = 0
+
+	err = e.parseSection()
 	if err != nil {
-		return written, fmt.Errorf("error writing end section: %w", err)
+		return read, err
 	}
 
-	return written, nil
+	return 0, nil
+
 }
 
-// TODO: remove once Read has been implemented
-// Currently exists so net/http doens't wrap this in a noopcloser
-func (Encoder) Close() error {
-	return nil
-}
+func (e *Encoder) parseSection() error {
+	start, end, err := detectDataSection(e.file, e.currentOffset)
+	if errors.Is(err, io.EOF) {
+		e.currentSection = bytes.NewReader([]byte{endIndicator})
+		e.currentSectionLength = 1
+		e.done = true
+		return nil
+	}
 
-func writeEndSection(w io.Writer) (int, error) {
-	return w.Write([]byte{endIndicator})
-}
-
-func writeSizeSection(w io.Writer, size int64) (int, error) {
-	var buf [9]byte
-	buf[0] = sizeIndicator
-
-	binary.LittleEndian.PutUint64(buf[1:], uint64(size))
-
-	return w.Write(buf[:])
-}
-
-func writeDataSection(w io.Writer, r io.ReadSeeker, start int64, end int64) (int64, error) {
-	_, err := r.Seek(start, io.SeekStart)
 	if err != nil {
-		return 0, err
+		return fmt.Errorf("error detecting data section: %w", err)
 	}
 
-	var buf [1 + 8 + 8]byte
-	buf[0] = dataIndicator
+	// char + int64 + int64
+	const headerSize =  1 + 8 + 8
 
 	length := end - start
+	e.currentSectionLength = length + headerSize // + 15 because of the header size
+	e.currentSectionEnd = end
+
+	_, err = e.file.Seek(start, io.SeekStart)
+	if err != nil {
+		return err
+	}
+
+	var buf [headerSize]byte
+	buf[0] = dataIndicator
 
 	binary.LittleEndian.PutUint64(buf[1:], uint64(start))
 	binary.LittleEndian.PutUint64(buf[1+8:], uint64(length))
 
-	written, err := w.Write(buf[:])
-	if err != nil {
-		return int64(written), err
-	}
+	headerReader := bytes.NewReader(buf[:])
+	fileReader := io.LimitReader(e.file, length)
 
-	copied, err := io.Copy(w, io.LimitReader(r, length))
-	return int64(written) + copied, err
-}
+	e.currentSection = io.MultiReader(headerReader, fileReader)
 
-func getFileSize(input io.Reader) (int64, error) {
-	// 1 byte for segment type. 8 bytes for int64
-	var header [1 + 8]byte
-	_, err := io.ReadFull(input, header[:])
-	if err != nil {
-		return 0, err
-	}
-
-	if header[0] != sizeIndicator {
-		return 0, fmt.Errorf("invalid header. Expected size segment but got %s", string(header[0]))
-	}
-
-	size := binary.LittleEndian.Uint64(header[1:])
-	return int64(size), nil
+	return nil
 }
