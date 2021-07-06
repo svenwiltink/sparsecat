@@ -293,7 +293,7 @@ func (e *Encoder) parseSection() error {
 	}
 
 	// char + int64 + int64
-	const headerSize =  1 + 8 + 8
+	const headerSize = 1 + 8 + 8
 
 	length := end - start
 	e.currentSectionLength = length + headerSize // + 15 because of the header size
@@ -304,7 +304,7 @@ func (e *Encoder) parseSection() error {
 		return err
 	}
 
-	var buf [headerSize]byte
+	buf := make([]byte, headerSize)
 	buf[0] = dataIndicator
 
 	binary.LittleEndian.PutUint64(buf[1:], uint64(start))

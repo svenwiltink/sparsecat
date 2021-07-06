@@ -1,10 +1,9 @@
 ## SparseCat
 
 ### Goal
-Transmitting sparse files using minimal amount of network bandwidth. Sparsecat 
-uses the SEEK_HOLE and SEEK_DATA capabilities of unix filesystems to find holes
-in sparse files and only transmits sections containing data. The wire format
-is simple and compatible with the ceph rbd diff v1 format as described [here](https://github.com/ceph/ceph/blob/aa913ced1240a366e063182cd359b562c626643d/doc/dev/rbd-diff.rst)
+Skipping the hole in sparse file when transmitting large files over the network. Using the filesystem seek capabilities
+hole can be detected. Instead of transmitting these zero bytes and wasting precious bandwidth only sections of the file
+containing data are sent.
 
 
 ### Example usage
@@ -21,9 +20,15 @@ sparsecat -if image.raw | pv | ssh GLaDOS sparsecat -r -of image.raw
 ```
 [![asciicast](https://asciinema.org/a/BMQStO5yWGWsG3xBigE2NV9Gx.svg)](https://asciinema.org/a/BMQStO5yWGWsG3xBigE2NV9Gx)
 
-### Support
+### But how does it work?
 
-Because the tool relies on the `lseek` syscall with `SEEK_HOLE` and `SEEK_DATA`
-only unix systems with the correct filesystems are supported. See [the man pages](https://man7.org/linux/man-pages/man2/lseek.2.html)
-for more information. `sparsecat` does work with unsupported filesystems, but it 
-will simply transmit the entire file with a couple of bytes of overhead.
+Sparsecat used the `SEEK_HOLE` and `SEEK_DATA` capabilities of `lseek` on linux. See [the man pages](https://man7.org/linux/man-pages/man2/lseek.2.html)
+for more information. Before sending the data inside a file Sparsecat creates a small header containing the size of the
+source file. The data sections follow this header. Each section consists of the offset in the target file, the length
+of the data section followed by the data itself. The wire format is identical to [ceph rbd export-diff](https://github.com/ceph/ceph/blob/aa913ced1240a366e063182cd359b562c626643d/doc/dev/rbd-diff.rst)
+
+
+When receiving a Sparsecat stream the Decoder detects if the target is an `*os.File`. When this is the case and the
+file is capable of seeking a fast path is used and the sparseness of the target file is preserved. When the target
+is not a file, such as an `io.Copy` to a buffer, Sparsecat will pad the output zero bytes. As if it is outputting the
+entire file.
