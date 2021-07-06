@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"os"
 )
@@ -15,6 +14,10 @@ const (
 	dataIndicator byte = 'w'
 	endIndicator  byte = 'e'
 )
+
+type onlyReader struct {
+	io.Reader
+}
 
 type zeroReader struct{}
 
@@ -35,46 +38,121 @@ func NewDecoder(reader io.Reader) *SparseDecoder {
 // is an *os.File (not a pipe or socket)
 type SparseDecoder struct {
 	reader io.Reader
+
+	fileSize      int64
+	currentOffset int64
+
+	currentSection       io.Reader
+	currentSectionLength int64
+	currentSectionRead   int
+
+	done bool
 }
 
 func (s *SparseDecoder) Read(p []byte) (int, error) {
-	panic("not implemented")
+	log.Println("slow path")
+	var err error
+	if s.currentSection == nil {
+		s.fileSize, err = getFileSize(s.reader)
+		if err != nil {
+			return 0, fmt.Errorf("error determining target file size: %w", err)
+		}
+
+		err = s.parseSection()
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	read, err := s.currentSection.Read(p)
+	s.currentSectionRead += read
+	s.currentOffset += int64(read)
+
+	if err == nil {
+		return read, nil
+	}
+	if !errors.Is(err, io.EOF) {
+		return read, err
+	}
+
+	// current section has ended. Was it expected?
+	if s.currentSectionLength != int64(s.currentSectionRead) {
+		return read, fmt.Errorf("read size doesn't equal section size. %d vs %d. %w", s.currentSectionRead, s.currentSectionLength, io.ErrUnexpectedEOF)
+	}
+
+	// EOF was expected. Are there more sections?
+	if s.done {
+		return read, err
+	}
+
+	// there are more sections to read. Reset counter and get next section
+	s.currentSectionRead = 0
+
+	// get next section
+	err = s.parseSection()
+	return read, err
+}
+
+func (s *SparseDecoder) parseSection() error {
+	// use 8 + 8 here as that is the maximum buffer size we need for parsing getting
+	// the data size. The two int64 for writing data sections.
+	var segmentHeader [8 + 8]byte
+
+	// first byte contains the segment type
+	_, err := io.ReadFull(s.reader, segmentHeader[0:1])
+	if err != nil {
+		return fmt.Errorf("error reading segmentHeader header: %w", err)
+	}
+
+	switch segmentHeader[0] {
+	case endIndicator:
+		s.currentSectionLength = s.fileSize - s.currentOffset
+		s.currentSection = io.LimitReader(zeroReader{}, s.currentSectionLength)
+		s.done = true
+	case dataIndicator:
+		_, err = io.ReadFull(s.reader, segmentHeader[:])
+		if err != nil {
+			return fmt.Errorf("error reading data header: %w", err)
+		}
+
+		offset := binary.LittleEndian.Uint64(segmentHeader[:9])
+		length := int64(binary.LittleEndian.Uint64(segmentHeader[8:]))
+		padding := int64(offset) - s.currentOffset
+
+		s.currentSectionLength = padding + length
+
+		paddingReader := io.LimitReader(zeroReader{}, padding)
+		dataReader := io.LimitReader(s.reader, length)
+
+		s.currentSection = io.MultiReader(paddingReader, dataReader)
+	default:
+		return fmt.Errorf(`invalid section type: "%d:" %x`, segmentHeader[0], segmentHeader[0])
+	}
+
+	return nil
 }
 
 func (s *SparseDecoder) WriteTo(writer io.Writer) (int64, error) {
-	log.Println("decoder fast path!")
-	var currentOffset int64 = 0
+	file, isFile := s.isSeekableFile(writer)
+	if !isFile {
+		return io.Copy(writer, onlyReader{s})
+	}
+
 	size, err := getFileSize(s.reader)
 
 	if err != nil {
 		return 0, fmt.Errorf("error determining target file size: %w", err)
 	}
 
+	err = SparseTruncate(file, size)
+	if err != nil {
+		return 0, fmt.Errorf("error truncating target file: %w", err)
+	}
+
 	// use 8 + 8 here as that is the maximum buffer size we need for parsing getting
 	// the data size. The two int64 for writing data sections.
 	var segmentHeader [8 + 8]byte
 	var written int64 = 0
-
-	file, isFile := writer.(*os.File)
-	if isFile {
-		fi, err := file.Stat()
-		if err != nil {
-			return 0, fmt.Errorf("error getting file stat: %w", err)
-		}
-
-		// check if the file is actually a file. Seeking is not supported for pipes and sockets
-		if fi.Mode()&(fs.ModeNamedPipe|fs.ModeSocket) != 0 {
-			log.Println("not a regular file, falling back to basic normal byte stream")
-			isFile = false
-		} else {
-			err = SparseTruncate(file, size)
-			if err != nil {
-				return 0, fmt.Errorf("error truncating target file: %w", err)
-			}
-		}
-	} else {
-		log.Println("no file detected, falling back to normal file stream")
-	}
 
 	for {
 		// first byte contains the segment type
@@ -85,11 +163,6 @@ func (s *SparseDecoder) WriteTo(writer io.Writer) (int64, error) {
 
 		switch segmentHeader[0] {
 		case endIndicator:
-			if !isFile {
-				var copied int64
-				copied, err = io.Copy(writer, io.LimitReader(zeroReader{}, size-currentOffset))
-				written += copied
-			}
 			return written, err
 		case dataIndicator:
 			_, err = io.ReadFull(s.reader, segmentHeader[:])
@@ -100,18 +173,9 @@ func (s *SparseDecoder) WriteTo(writer io.Writer) (int64, error) {
 			offset := binary.LittleEndian.Uint64(segmentHeader[:9])
 			length := binary.LittleEndian.Uint64(segmentHeader[8:])
 
-			if isFile {
-				_, err = file.Seek(int64(offset), io.SeekStart)
-				if err != nil {
-					return written, fmt.Errorf("error seeking to start of data section: %w", err)
-				}
-			} else {
-				// instead of seeking we fill the stream with enough empty data
-				copied, err := io.Copy(writer, io.LimitReader(zeroReader{}, int64(offset)-currentOffset))
-				written += copied
-				if err != nil {
-					return written, fmt.Errorf("error copying data: %w", err)
-				}
+			_, err = file.Seek(int64(offset), io.SeekStart)
+			if err != nil {
+				return written, fmt.Errorf("error seeking to start of data section: %w", err)
 			}
 
 			copied, err := io.Copy(writer, io.LimitReader(s.reader, int64(length)))
@@ -119,12 +183,20 @@ func (s *SparseDecoder) WriteTo(writer io.Writer) (int64, error) {
 			if err != nil {
 				return written, fmt.Errorf("error copying data: %w", err)
 			}
-
-			currentOffset = int64(offset + length)
 		default:
 			return written, fmt.Errorf("invalid section type: %b", segmentHeader[0])
 		}
 	}
+}
+
+func (s *SparseDecoder) isSeekableFile(writer io.Writer) (*os.File, bool) {
+	file, isFile := writer.(*os.File)
+	if isFile {
+		// not all files are actually seekable. pipes aren't for example
+		_, err := file.Seek(0, io.SeekCurrent)
+		return file, err == nil
+	}
+	return nil, false
 }
 
 func NewEncoder(file *os.File) *Encoder {
