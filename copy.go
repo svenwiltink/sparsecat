@@ -271,15 +271,11 @@ func (e *Encoder) Read(p []byte) (int, error) {
 		return read, io.EOF
 	}
 
-	e.currentOffset += e.currentSectionEnd
+	e.currentOffset = e.currentSectionEnd
 	e.currentSectionRead = 0
 
 	err = e.parseSection()
-	if err != nil {
-		return read, err
-	}
-
-	return 0, nil
+	return read, err
 
 }
 
