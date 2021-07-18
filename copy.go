@@ -243,11 +243,12 @@ func (e *Encoder) Read(p []byte) (int, error) {
 			return 0, fmt.Errorf("error running stat: %w", err)
 		}
 
-		buf := make([]byte, 9)
+		buf := make([]byte, 1+8+8)
 		buf[0] = sizeIndicator
-		binary.LittleEndian.PutUint64(buf[1:], uint64(info.Size()))
+		binary.LittleEndian.PutUint64(buf[1:], 8)
+		binary.LittleEndian.PutUint64(buf[9:], uint64(info.Size()))
 		e.currentSection = bytes.NewReader(buf)
-		e.currentSectionLength = 9
+		e.currentSectionLength = 1+8+8
 	}
 
 	read, err := e.currentSection.Read(p)
@@ -276,7 +277,6 @@ func (e *Encoder) Read(p []byte) (int, error) {
 
 	err = e.parseSection()
 	return read, err
-
 }
 
 func (e *Encoder) parseSection() error {
@@ -292,11 +292,11 @@ func (e *Encoder) parseSection() error {
 		return fmt.Errorf("error detecting data section: %w", err)
 	}
 
-	// char + int64 + int64
-	const headerSize = 1 + 8 + 8
+	// char + int64 + int64 + int64
+	const headerSize = 1 + 8 + 8 + 8
 
 	length := end - start
-	e.currentSectionLength = length + headerSize // + 15 because of the header size
+	e.currentSectionLength = length + headerSize
 	e.currentSectionEnd = end
 
 	_, err = e.file.Seek(start, io.SeekStart)
@@ -307,8 +307,9 @@ func (e *Encoder) parseSection() error {
 	buf := make([]byte, headerSize)
 	buf[0] = dataIndicator
 
-	binary.LittleEndian.PutUint64(buf[1:], uint64(start))
-	binary.LittleEndian.PutUint64(buf[1+8:], uint64(length))
+	binary.LittleEndian.PutUint64(buf[1:], uint64(length + 16))
+	binary.LittleEndian.PutUint64(buf[1+8:], uint64(start))
+	binary.LittleEndian.PutUint64(buf[1+8+8:], uint64(length))
 
 	headerReader := bytes.NewReader(buf[:])
 	fileReader := io.LimitReader(e.file, length)
