@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"github.com/svenwiltink/sparsecat"
+	"github.com/svenwiltink/sparsecat/format"
 	"io"
 	"log"
 	"os"
@@ -18,10 +19,16 @@ const (
 func main() {
 	inputFileName := flag.String("if", "", "input inputFile. '-' for stdin")
 	outputFileName := flag.String("of", "", "output inputFile. '-' for stdout")
+	formatName := flag.String("format", "rbd-diff-v1", "the wire format to use. Currently either rbd-diff-v1 or rbd-diff-v2")
 	receive := flag.Bool("r", false, "receive a file instead of transmitting")
 	flag.Parse()
 
 	log.SetFlags(0)
+
+	f, exists := format.GetByName(*formatName)
+	if !exists {
+		log.Fatalf("Format %s doesn't exist", *formatName)
+	}
 
 	operation := Send
 	if *receive {
@@ -44,6 +51,7 @@ func main() {
 
 	if operation == Send {
 		encoder := sparsecat.NewEncoder(inputFile)
+		encoder.Format = f
 		_, err := io.Copy(outputFile, encoder)
 		if err != nil {
 			log.Fatal(err)
@@ -52,6 +60,8 @@ func main() {
 	}
 
 	decoder := sparsecat.NewDecoder(inputFile)
+	decoder.Format = f
+
 	_, err := io.Copy(outputFile, decoder)
 	if err != nil {
 		log.Fatal(err)
