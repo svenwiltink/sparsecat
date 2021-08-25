@@ -64,7 +64,7 @@ func slowDetectDataSection(file io.Reader, currentOffset int64) (start int64, en
 		}
 
 		if read == 0 && errors.Is(err, io.EOF) {
-			return currentOffset, currentOffset, nil, io.EOF
+			return 0, 0, nil, err
 		}
 
 		// buffer is empty, discard data but advance offset unless EOF
@@ -73,7 +73,7 @@ func slowDetectDataSection(file io.Reader, currentOffset int64) (start int64, en
 			continue
 		}
 
-		return currentOffset, currentOffset + int64(read), bytes.NewReader(buf[:]), nil
+		return currentOffset, currentOffset + int64(read), bytes.NewReader(buf[:read]), nil
 	}
 }
 
