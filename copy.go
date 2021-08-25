@@ -197,6 +197,8 @@ type Encoder struct {
 	currentSectionEnd    int64
 	currentSectionRead   int
 
+	isBlockDevice bool
+
 	done bool
 }
 
@@ -207,7 +209,19 @@ func (e *Encoder) Read(p []byte) (int, error) {
 			return 0, fmt.Errorf("error running stat: %w", err)
 		}
 
-		e.currentSection, e.currentSectionLength = e.Format.GetFileSizeReader(uint64(info.Size()))
+		size := uint64(info.Size())
+		if isBlockDevice(info) {
+			e.isBlockDevice = true
+
+			bsize, err := getBlockDeviceSize(e.file)
+			if err != nil {
+				return 0, fmt.Errorf("error determining size of block device: %w", err)
+			}
+
+			size = uint64(int64(bsize))
+		}
+
+		e.currentSection, e.currentSectionLength = e.Format.GetFileSizeReader(size)
 	}
 
 	read, err := e.currentSection.Read(p)
@@ -239,6 +253,30 @@ func (e *Encoder) Read(p []byte) (int, error) {
 }
 
 func (e *Encoder) parseSection() error {
+	if e.isBlockDevice {
+		fmt.Println("reading block device")
+		start, end, reader, err := slowDetectDataSection(e.file, e.currentOffset)
+		if errors.Is(err, io.EOF) {
+			e.currentSection, e.currentSectionLength = e.Format.GetEndTagReader()
+			e.done = true
+			return nil
+		}
+
+		if err != nil {
+			return fmt.Errorf("error detecting data section for block device: %w", err)
+		}
+
+		length := end - start
+		e.currentSectionEnd = end
+
+		e.currentSection, e.currentSectionLength = e.Format.GetSectionReader(reader, format.Section{
+			Offset: start,
+			Length: length,
+		})
+
+		return nil
+	}
+
 	start, end, err := detectDataSection(e.file, e.currentOffset)
 	if errors.Is(err, io.EOF) {
 		e.currentSection, e.currentSectionLength = e.Format.GetEndTagReader()

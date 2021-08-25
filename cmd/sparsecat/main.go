@@ -23,7 +23,7 @@ func main() {
 	receive := flag.Bool("r", false, "receive a file instead of transmitting")
 	flag.Parse()
 
-	log.SetFlags(0)
+	log.SetFlags(log.Llongfile)
 
 	f, exists := format.GetByName(*formatName)
 	if !exists {

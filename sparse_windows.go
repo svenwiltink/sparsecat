@@ -54,6 +54,10 @@ func detectDataSection(file *os.File, offset int64) (start int64, end int64, err
 	return allocRanges[0].offset, allocRanges[0].offset + allocRanges[0].length, nil
 }
 
+func getBlockDeviceSize() (int64, error) {
+	return 0, errors.New("operation not supported")
+}
+
 func SparseTruncate(file *os.File, size int64) error {
 	err := windows.DeviceIoControl(
 		windows.Handle(file.Fd()), setSparse,
