@@ -60,7 +60,7 @@ func (s *Decoder) Read(p []byte) (int, error) {
 
 		err = s.parseSection()
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("error reading first section: %w", err)
 		}
 	}
 
@@ -94,18 +94,8 @@ func (s *Decoder) Read(p []byte) (int, error) {
 }
 
 func (s *Decoder) parseSection() error {
-	// use 8 + 8 here as that is the maximum buffer size we need for parsing getting
-	// the data size. The two int64 for writing data sections.
-	var segmentHeader [8 + 8]byte
-
-	// first byte contains the segment type
-	_, err := io.ReadFull(s.reader, segmentHeader[0:1])
-	if err != nil {
-		return fmt.Errorf("error reading segmentHeader header: %w", err)
-	}
-
 	section, err := s.Format.ReadSectionHeader(s.reader)
-	if err == io.EOF {
+	if errors.Is(err, io.EOF) {
 		s.currentSectionLength = s.fileSize - s.currentOffset
 		s.currentSection = io.LimitReader(zeroReader{}, s.currentSectionLength)
 		s.done = true
@@ -254,7 +244,6 @@ func (e *Encoder) Read(p []byte) (int, error) {
 
 func (e *Encoder) parseSection() error {
 	if e.isBlockDevice {
-		fmt.Println("reading block device")
 		start, end, reader, err := slowDetectDataSection(e.file, e.currentOffset)
 		if errors.Is(err, io.EOF) {
 			e.currentSection, e.currentSectionLength = e.Format.GetEndTagReader()
