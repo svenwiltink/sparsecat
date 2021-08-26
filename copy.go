@@ -8,12 +8,6 @@ import (
 	"os"
 )
 
-const (
-	sizeIndicator byte = 's'
-	dataIndicator byte = 'w'
-	endIndicator  byte = 'e'
-)
-
 type onlyReader struct {
 	io.Reader
 }
@@ -187,7 +181,7 @@ type Encoder struct {
 	currentSectionEnd    int64
 	currentSectionRead   int
 
-	isBlockDevice bool
+	supportsHoleDetection bool
 
 	done bool
 }
@@ -200,9 +194,9 @@ func (e *Encoder) Read(p []byte) (int, error) {
 		}
 
 		size := uint64(info.Size())
-		if isBlockDevice(info) {
-			e.isBlockDevice = true
+		e.supportsHoleDetection = supportsSeekHole(e.file)
 
+		if isBlockDevice(info) {
 			bsize, err := getBlockDeviceSize(e.file)
 			if err != nil {
 				return 0, fmt.Errorf("error determining size of block device: %w", err)
@@ -243,27 +237,8 @@ func (e *Encoder) Read(p []byte) (int, error) {
 }
 
 func (e *Encoder) parseSection() error {
-	if e.isBlockDevice {
-		start, end, reader, err := slowDetectDataSection(e.file, e.currentOffset)
-		if errors.Is(err, io.EOF) {
-			e.currentSection, e.currentSectionLength = e.Format.GetEndTagReader()
-			e.done = true
-			return nil
-		}
-
-		if err != nil {
-			return fmt.Errorf("error detecting data section for block device: %w", err)
-		}
-
-		length := end - start
-		e.currentSectionEnd = end
-
-		e.currentSection, e.currentSectionLength = e.Format.GetSectionReader(reader, format.Section{
-			Offset: start,
-			Length: length,
-		})
-
-		return nil
+	if !e.supportsHoleDetection {
+		return e.slowDetectSection()
 	}
 
 	start, end, err := detectDataSection(e.file, e.currentOffset)
@@ -286,6 +261,29 @@ func (e *Encoder) parseSection() error {
 	}
 
 	e.currentSection, e.currentSectionLength = e.Format.GetSectionReader(e.file, format.Section{
+		Offset: start,
+		Length: length,
+	})
+
+	return nil
+}
+
+func (e *Encoder) slowDetectSection() error {
+	start, end, reader, err := slowDetectDataSection(e.file, e.currentOffset)
+	if errors.Is(err, io.EOF) {
+		e.currentSection, e.currentSectionLength = e.Format.GetEndTagReader()
+		e.done = true
+		return nil
+	}
+
+	if err != nil {
+		return fmt.Errorf("error detecting data section for block device: %w", err)
+	}
+
+	length := end - start
+	e.currentSectionEnd = end
+
+	e.currentSection, e.currentSectionLength = e.Format.GetSectionReader(reader, format.Section{
 		Offset: start,
 		Length: length,
 	})

@@ -3,7 +3,6 @@
 package sparsecat
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"golang.org/x/sys/unix"
@@ -52,37 +51,16 @@ func detectDataSection(file *os.File, offset int64) (start int64, end int64, err
 	return startOfData, endOfData, err
 }
 
-// slowDetectDataSection detects data sections by reading a buffer at the time, discarding any that don't contain
-// data. Only returns EOF when there is no data to be copied anymore
-func slowDetectDataSection(file io.Reader, currentOffset int64) (start int64, end int64, reader io.Reader, err error) {
-	var buf [BLK_READ_BUFFER]byte
+func supportsSeekHole(file *os.File) bool {
+	var syserr syscall.Errno
 
-	for {
-		read, err := file.Read(buf[:])
-		if err != nil && !errors.Is(err, io.EOF) {
-			return 0, 0, nil, err
-		}
-
-		if read == 0 && errors.Is(err, io.EOF) {
-			return 0, 0, nil, err
-		}
-
-		// buffer is empty, discard data but advance offset unless EOF
-		if isBufferEmpty(buf[:read]) {
-			currentOffset += int64(read)
-			continue
-		}
-
-		return currentOffset, currentOffset + int64(read), bytes.NewReader(buf[:read]), nil
-	}
-}
-
-func isBufferEmpty(buf []byte) bool {
-	for _, b := range buf {
-		if b !=0 {
+	_, err := unix.Seek(int(file.Fd()), 0, SEEK_DATA)
+	if errors.As(err, &syserr) {
+		if syserr == syscall.EINVAL {
 			return false
 		}
 	}
+
 	return true
 }
 
