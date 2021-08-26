@@ -54,6 +54,10 @@ func detectDataSection(file *os.File, offset int64) (start int64, end int64, err
 	return allocRanges[0].offset, allocRanges[0].offset + allocRanges[0].length, nil
 }
 
+func supportsSeekHole(f *os.File) bool {
+	return true
+}
+
 func getBlockDeviceSize() (int64, error) {
 	return 0, errors.New("operation not supported")
 }
