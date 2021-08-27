@@ -21,9 +21,11 @@ func main() {
 	outputFileName := flag.String("of", "", "output inputFile. '-' for stdout")
 	formatName := flag.String("format", "rbd-diff-v1", "the wire format to use. Currently either rbd-diff-v1 or rbd-diff-v2")
 	receive := flag.Bool("r", false, "receive a file instead of transmitting")
+	disableSparseTarget := flag.Bool("disable-sparse-target", false, "disable sparse writing the target file")
+
 	flag.Parse()
 
-	log.SetFlags(log.Llongfile)
+	log.SetFlags(0)
 
 	f, exists := format.GetByName(*formatName)
 	if !exists {
@@ -61,6 +63,7 @@ func main() {
 
 	decoder := sparsecat.NewDecoder(inputFile)
 	decoder.Format = f
+	decoder.DisableSparseWriting = *disableSparseTarget
 
 	_, err := io.Copy(outputFile, decoder)
 	if err != nil {
@@ -71,7 +74,7 @@ func main() {
 func setupFiles(operation OperationType, inputFileName string, outputFileName string) (*os.File, *os.File) {
 	if inputFileName == "" {
 		flag.Usage()
-		log.Fatal("input inputFile required")
+		os.Exit(1)
 	}
 
 	var inputFile *os.File
