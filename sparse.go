@@ -7,6 +7,8 @@ import (
 	"os"
 )
 
+const  	BLK_READ_BUFFER = 4_000_000 // 4MB
+
 func isBlockDevice(fi os.FileInfo) bool {
 	return fi.Mode()&os.ModeDevice == os.ModeDevice
 }

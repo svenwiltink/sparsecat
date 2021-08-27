@@ -58,7 +58,7 @@ func supportsSeekHole(f *os.File) bool {
 	return true
 }
 
-func getBlockDeviceSize() (int64, error) {
+func getBlockDeviceSize(f *os.File) (int64, error) {
 	return 0, errors.New("operation not supported")
 }
 
