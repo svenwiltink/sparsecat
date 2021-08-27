@@ -142,7 +142,7 @@ func (d *Decoder) WriteTo(writer io.Writer) (int64, error) {
 	for {
 		section, err := d.Format.ReadSectionHeader(d.reader)
 		if errors.Is(err, io.EOF) {
-			return written, err
+			return written, nil
 		}
 
 		if err != nil {
