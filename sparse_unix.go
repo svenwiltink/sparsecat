@@ -14,8 +14,6 @@ import (
 const (
 	SEEK_DATA = 3
 	SEEK_HOLE = 4
-
-	BLK_READ_BUFFER = 4_000_000 // 4MB
 )
 
 // detectDataSection detects the start and end of the next section containing data. This
