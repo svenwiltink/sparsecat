@@ -194,15 +194,17 @@ func (e *Encoder) Read(p []byte) (int, error) {
 		}
 
 		size := uint64(info.Size())
-		e.supportsHoleDetection = supportsSeekHole(e.file)
 
 		if isBlockDevice(info) {
+			e.supportsHoleDetection = false
 			bsize, err := getBlockDeviceSize(e.file)
 			if err != nil {
 				return 0, fmt.Errorf("error determining size of block device: %w", err)
 			}
 
-			size = uint64(int64(bsize))
+			size = uint64(bsize)
+		} else {
+			e.supportsHoleDetection = supportsSeekHole(e.file)
 		}
 
 		e.currentSection, e.currentSectionLength = e.Format.GetFileSizeReader(size)

@@ -8,7 +8,7 @@ import (
 )
 
 func isBlockDevice(fi os.FileInfo) bool {
-	return fi.Mode() & os.ModeDevice == os.ModeDevice
+	return fi.Mode()&os.ModeDevice == os.ModeDevice
 }
 
 // slowDetectDataSection detects data sections by reading a buffer at the time, discarding any that don't contain
@@ -38,7 +38,7 @@ func slowDetectDataSection(file io.Reader, currentOffset int64) (start int64, en
 
 func isBufferEmpty(buf []byte) bool {
 	for _, b := range buf {
-		if b !=0 {
+		if b != 0 {
 			return false
 		}
 	}
