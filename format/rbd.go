@@ -13,6 +13,8 @@ const (
 	endIndicator  byte = 'e'
 )
 
+// RbdDiffv1 implements the rbd diff v1 wire format as described by https://github.com/ceph/ceph/blob/master/doc/dev/rbd-diff.rst#header.
+// Only the Size, UpdatedData and End sections are implemented. Zero data is simply not transmitted.
 var RbdDiffv1 rbdDiffv1
 
 type rbdDiffv1 struct{}
@@ -92,6 +94,8 @@ func (r rbdDiffv1) GetEndTagReader() (reader io.Reader, length int64) {
 	return bytes.NewReader([]byte{endIndicator}), 1
 }
 
+// RbdDiffv2 implements the rbd diff v2 wire format as described by https://github.com/ceph/ceph/blob/master/doc/dev/rbd-diff.rst#header-1.
+// Only the Size, UpdatedData and End sections are implemented. Zero data is simply not transmitted.
 var RbdDiffv2 rbdDiffv2
 
 type rbdDiffv2 struct{}
