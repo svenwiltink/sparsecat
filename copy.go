@@ -173,13 +173,16 @@ func (d *Decoder) isSeekableFile(writer io.Writer) (*os.File, bool) {
 }
 
 func NewEncoder(file *os.File) *Encoder {
-	return &Encoder{file: file, Format: format.RbdDiffv1}
+	return &Encoder{file: file, Format: format.RbdDiffv1, MaxSectionSize: 1 << 32}
 }
 
 // Encoder encodes a file to a stream of sparsecat data.
 type Encoder struct {
-	file     *os.File
-	Format   format.Format
+	file *os.File
+
+	Format         format.Format
+	MaxSectionSize int64
+
 	fileSize int64
 
 	currentOffset        int64
@@ -262,6 +265,12 @@ func (e *Encoder) parseSection() error {
 	}
 
 	length := end - start
+
+	if length > e.MaxSectionSize {
+		end = start + e.MaxSectionSize
+		length = e.MaxSectionSize
+	}
+
 	e.currentSectionEnd = end
 
 	_, err = e.file.Seek(start, io.SeekStart)

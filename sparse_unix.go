@@ -50,16 +50,8 @@ func detectDataSection(file *os.File, offset int64) (start int64, end int64, err
 }
 
 func supportsSeekHole(file *os.File) bool {
-	var syserr syscall.Errno
-
 	_, err := unix.Seek(int(file.Fd()), 0, SEEK_DATA)
-	if errors.As(err, &syserr) {
-		if syserr == syscall.EINVAL {
-			return false
-		}
-	}
-
-	return true
+	return err == nil
 }
 
 func getBlockDeviceSize(file *os.File) (int, error) {
