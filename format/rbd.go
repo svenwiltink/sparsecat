@@ -164,7 +164,7 @@ func (r rbdDiffv2) GetSectionReader(source io.Reader, section Section) (reader i
 	buf := make([]byte, headerSize)
 	buf[0] = dataIndicator
 
-	binary.LittleEndian.PutUint64(buf[1:], 16)
+	binary.LittleEndian.PutUint64(buf[1:], 16+uint64(section.Length))
 	binary.LittleEndian.PutUint64(buf[1+8:], uint64(section.Offset))
 	binary.LittleEndian.PutUint64(buf[1+8+8:], uint64(section.Length))
 
