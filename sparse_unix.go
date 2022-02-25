@@ -1,3 +1,4 @@
+//go:build darwin || dragonfly || freebsd || linux || netbsd || openbsd || solaris
 // +build darwin dragonfly freebsd linux netbsd openbsd solaris
 
 package sparsecat
@@ -5,10 +6,11 @@ package sparsecat
 import (
 	"errors"
 	"fmt"
-	"golang.org/x/sys/unix"
 	"io"
 	"os"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -52,10 +54,6 @@ func detectDataSection(file *os.File, offset int64) (start int64, end int64, err
 func supportsSeekHole(file *os.File) bool {
 	_, err := unix.Seek(int(file.Fd()), 0, SEEK_DATA)
 	return err == nil
-}
-
-func getBlockDeviceSize(file *os.File) (int, error) {
-	return unix.IoctlGetInt(int(file.Fd()), unix.BLKGETSIZE64)
 }
 
 func SparseTruncate(file *os.File, size int64) error {

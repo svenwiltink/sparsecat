@@ -58,10 +58,6 @@ func supportsSeekHole(f *os.File) bool {
 	return true
 }
 
-func getBlockDeviceSize(f *os.File) (int64, error) {
-	return 0, errors.New("operation not supported")
-}
-
 func SparseTruncate(file *os.File, size int64) error {
 	err := windows.DeviceIoControl(
 		windows.Handle(file.Fd()), setSparse,
