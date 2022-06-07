@@ -6,6 +6,19 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func getBlockDeviceSize(file *os.File) (int, error) {
-	return unix.IoctlGetInt(int(file.Fd()), unix.BLKGETSIZE64)
+func getBlockDeviceSize(file *os.File) (size int, err error) {
+	conn, err := file.SyscallConn()
+	if err != nil {
+		return 0, err
+	}
+
+	connerr := conn.Control(func(fd uintptr) {
+		size, err = unix.IoctlGetInt(int(fd), unix.BLKGETSIZE64)
+	})
+
+	if connerr != nil {
+		return 0, connerr
+	}
+
+	return size, err
 }
