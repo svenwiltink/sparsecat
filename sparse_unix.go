@@ -9,8 +9,6 @@ import (
 	"io"
 	"os"
 	"syscall"
-
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -24,7 +22,7 @@ const (
 func detectDataSection(file *os.File, offset int64) (start int64, end int64, err error) {
 	var syserr syscall.Errno
 
-	startOfData, err := unix.Seek(int(file.Fd()), offset, SEEK_DATA)
+	startOfData, err := file.Seek(offset, SEEK_DATA)
 	if errors.As(err, &syserr) {
 		if syserr == syscall.ENXIO {
 			return 0, 0, io.EOF
@@ -36,7 +34,7 @@ func detectDataSection(file *os.File, offset int64) (start int64, end int64, err
 		return 0, 0, fmt.Errorf("error seeking to data: %w", err)
 	}
 
-	endOfData, err := unix.Seek(int(file.Fd()), startOfData, SEEK_HOLE)
+	endOfData, err := file.Seek(startOfData, SEEK_HOLE)
 	if errors.As(err, &syserr) {
 		if syserr == syscall.ENXIO {
 			return 0, 0, io.EOF
@@ -52,7 +50,7 @@ func detectDataSection(file *os.File, offset int64) (start int64, end int64, err
 }
 
 func supportsSeekHole(file *os.File) bool {
-	_, err := unix.Seek(int(file.Fd()), 0, SEEK_DATA)
+	_, err := file.Seek(0, SEEK_DATA)
 	return err == nil
 }
 
