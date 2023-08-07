@@ -32,6 +32,7 @@ func NewDecoder(reader io.Reader) *Decoder {
 type Decoder struct {
 	Format               format.Format
 	DisableSparseWriting bool
+	DisableFileTruncate  bool
 
 	reader io.Reader
 
@@ -115,7 +116,8 @@ func (d *Decoder) parseSection() error {
 // WriteTo is the fast path optimisation of Decoder.Read. If the target of io.Copy is an *os.File that is
 // capable of seeking WriteTo will be used. It preserves the sparseness of the target file and does not need
 // to write the entire file. Only section of the file containing data will be written. When s.DisableSparseWriting
-// has been set this falls back to io.Copy with only the s.Read function exposed
+// has been set this falls back to io.Copy with only the s.Read function exposed. When s.DisableFileTruncate has
+// been set the output file will not be truncated prior to writing to it
 func (d *Decoder) WriteTo(writer io.Writer) (int64, error) {
 	if d.DisableSparseWriting {
 		return io.Copy(writer, onlyReader{d})
@@ -132,9 +134,11 @@ func (d *Decoder) WriteTo(writer io.Writer) (int64, error) {
 		return 0, fmt.Errorf("error determining target file size: %w", err)
 	}
 
-	err = SparseTruncate(file, size)
-	if err != nil {
-		return 0, fmt.Errorf("error truncating target file: %w", err)
+	if !d.DisableFileTruncate {
+		err = SparseTruncate(file, size)
+		if err != nil {
+			return 0, fmt.Errorf("error truncating target file: %w", err)
+		}
 	}
 
 	var written int64 = 0
