@@ -51,6 +51,14 @@ func detectDataSection(file *os.File, offset int64) (start int64, end int64, err
 
 func supportsSeekHole(file *os.File) bool {
 	_, err := file.Seek(0, SEEK_DATA)
+	var syserr syscall.Errno
+
+	// when a file is completely empty SEEK_DATA fails with ENXIO indicating an EOF.
+	if errors.As(err, &syserr) {
+		if syserr == syscall.ENXIO {
+			return true
+		}
+	}
 	return err == nil
 }
 
